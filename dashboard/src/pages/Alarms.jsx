@@ -1,10 +1,9 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
+import { api, usePolling } from "../lib/api";
 
 // ═══════════════════════════════════════════════════════════════════════════
-// MCS STREAM D — ALARM MANAGEMENT VIEW
+// MCS STREAM D — ALARM MANAGEMENT VIEW (LIVE)
 // ═══════════════════════════════════════════════════════════════════════════
-// Full alarm table with sorting, filtering, operator actions.
-// ISA-18.2 compliance metrics at the top.
 
 const C = {
   bg: "#0a0e17", card: "#111827", border: "#1e293b", text: "#e2e8f0",
@@ -25,15 +24,6 @@ const timeAgo = (iso) => {
   return `${Math.floor(s / 86400)}d`;
 };
 
-const SAMPLE_ALARMS = [
-  { id: 1, sensor_id: 2, priority: "P0", state: "ACTIVE", tag: "CDU-01-T-RET", subsystem: "thermal-l1", block_id: "block-01", site_id: "baldwinsville", value_at_raise: 60.2, threshold_value: 60.0, threshold_direction: "HIGH", raised_at: new Date(Date.now() - 120000).toISOString(), last_value: 61.3 },
-  { id: 2, sensor_id: 5, priority: "P1", state: "ACTIVE", tag: "CDU-02-T-RET", subsystem: "thermal-l1", block_id: "block-01", site_id: "baldwinsville", value_at_raise: 55.4, threshold_value: 55.0, threshold_direction: "HIGH", raised_at: new Date(Date.now() - 300000).toISOString(), last_value: 55.8 },
-  { id: 3, sensor_id: 12, priority: "P2", state: "ACKED", tag: "ML-FLOW", subsystem: "thermal-l2", block_id: "block-01", site_id: "baldwinsville", value_at_raise: 295.0, threshold_value: 300.0, threshold_direction: "LOW", raised_at: new Date(Date.now() - 1800000).toISOString(), acked_at: new Date(Date.now() - 1500000).toISOString(), acked_by: "nick.searra", last_value: 298.2 },
-  { id: 4, sensor_id: 15, priority: "P2", state: "RTN_UNACK", tag: "ML-GLYCOL-CONC", subsystem: "thermal-l2", block_id: "block-01", site_id: "baldwinsville", value_at_raise: 31.8, threshold_value: 32.0, threshold_direction: "LOW", raised_at: new Date(Date.now() - 3600000).toISOString(), last_value: 33.1 },
-  { id: 5, sensor_id: 6, priority: "P3", state: "SHELVED", tag: "CDU-02-FLOW", subsystem: "thermal-l1", block_id: "block-01", site_id: "baldwinsville", value_at_raise: 62.1, threshold_value: 65.0, threshold_direction: "LOW", raised_at: new Date(Date.now() - 7200000).toISOString(), shelved_by: "dave.ops", shelve_reason: "Sensor calibration in progress", shelved_until: new Date(Date.now() + 14400000).toISOString(), last_value: 63.8 },
-  { id: 6, sensor_id: 40, priority: "P3", state: "SUPPRESSED", tag: "ENV-T-AMB", subsystem: "environmental", block_id: "block-01", site_id: "baldwinsville", value_at_raise: 28.5, threshold_value: 28.0, threshold_direction: "HIGH", raised_at: new Date(Date.now() - 600000).toISOString(), last_value: 28.2 },
-];
-
 const Badge = ({ children, color, bg }) => (
   <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.5px", padding: "2px 7px", borderRadius: 4, color, backgroundColor: bg, whiteSpace: "nowrap" }}>{children}</span>
 );
@@ -47,49 +37,72 @@ const FilterChip = ({ label, active, onClick }) => (
 );
 
 export default function AlarmManagement() {
-  const [alarms, setAlarms] = useState(SAMPLE_ALARMS);
   const [filterState, setFilterState] = useState(null);
   const [filterPriority, setFilterPriority] = useState(null);
   const [sortBy, setSortBy] = useState("priority");
-  const [ackingId, setAckingId] = useState(null);
   const [shelveId, setShelveId] = useState(null);
   const [shelveReason, setShelveReason] = useState("");
+  const [actionError, setActionError] = useState(null);
+  const [actionPending, setActionPending] = useState(null);
 
-  const filtered = useMemo(() => {
+  // Poll alarms every 5s
+  const { data: alarmData, loading, refetch } = usePolling(
+    () => api.listAlarms({
+      state: filterState || undefined,
+      priority: filterPriority || undefined,
+    }),
+    5000,
+    [filterState, filterPriority]
+  );
+
+  // Poll ISA-18.2 stats every 15s
+  const { data: stats } = usePolling(() => api.alarmStats(), 15000);
+
+  const alarms = alarmData?.alarms || [];
+
+  const sorted = useMemo(() => {
     let result = [...alarms];
-    if (filterState) result = result.filter(a => a.state === filterState);
-    if (filterPriority) result = result.filter(a => a.priority === filterPriority);
     if (sortBy === "priority") {
       const order = { P0: 0, P1: 1, P2: 2, P3: 3 };
-      result.sort((a, b) => order[a.priority] - order[b.priority] || new Date(b.raised_at) - new Date(a.raised_at));
+      result.sort((a, b) => (order[a.priority] ?? 9) - (order[b.priority] ?? 9) || new Date(b.raised_at) - new Date(a.raised_at));
     } else if (sortBy === "time") {
       result.sort((a, b) => new Date(b.raised_at) - new Date(a.raised_at));
     } else if (sortBy === "subsystem") {
-      result.sort((a, b) => a.subsystem.localeCompare(b.subsystem));
+      result.sort((a, b) => (a.subsystem || "").localeCompare(b.subsystem || ""));
     }
     return result;
-  }, [alarms, filterState, filterPriority, sortBy]);
+  }, [alarms, sortBy]);
 
-  const standing = alarms.filter(a => a.state === "ACTIVE" || a.state === "RTN_UNACK").length;
-  const stateCounts = alarms.reduce((acc, a) => { acc[a.state] = (acc[a.state] || 0) + 1; return acc; }, {});
+  const handleAck = useCallback(async (alarm) => {
+    setActionPending(alarm.id);
+    setActionError(null);
+    try {
+      await api.acknowledgeAlarm(alarm.sensor_id, "operator");
+      await refetch();
+    } catch (err) {
+      setActionError(`ACK failed: ${err.message || err.detail || "Unknown error"}`);
+    } finally {
+      setActionPending(null);
+    }
+  }, [refetch]);
 
-  const handleAck = (alarm) => {
-    setAlarms(prev => prev.map(a => a.id === alarm.id ? {
-      ...a, state: a.state === "RTN_UNACK" ? "CLEARED" : "ACKED",
-      acked_at: new Date().toISOString(), acked_by: "nick.searra"
-    } : a));
-    setAckingId(null);
-  };
-
-  const handleShelve = (alarm) => {
+  const handleShelve = useCallback(async (alarm) => {
     if (shelveReason.length < 3) return;
-    setAlarms(prev => prev.map(a => a.id === alarm.id ? {
-      ...a, state: "SHELVED", shelved_by: "nick.searra", shelve_reason: shelveReason,
-      shelved_until: new Date(Date.now() + 8 * 3600000).toISOString()
-    } : a));
-    setShelveId(null);
-    setShelveReason("");
-  };
+    setActionPending(alarm.id);
+    setActionError(null);
+    try {
+      await api.shelveAlarm(alarm.sensor_id, "operator", shelveReason, 8);
+      setShelveId(null);
+      setShelveReason("");
+      await refetch();
+    } catch (err) {
+      setActionError(`Shelve failed: ${err.message || err.detail || "Unknown error"}`);
+    } finally {
+      setActionPending(null);
+    }
+  }, [shelveReason, refetch]);
+
+  const standing = stats?.standing ?? alarmData?.standing ?? 0;
 
   return (
     <div style={{ minHeight: "100vh", background: C.bg, color: C.text, fontFamily: "'DM Sans', system-ui, sans-serif", padding: 16 }}>
@@ -98,18 +111,28 @@ export default function AlarmManagement() {
       {/* Header */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
         <div style={{ fontSize: 18, fontWeight: 800 }}>Alarm Management</div>
-        <div style={{ fontSize: 11, color: C.muted }}>block-01 · AB InBev Baldwinsville</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          {actionError && <span style={{ fontSize: 11, color: C.red }}>{actionError}</span>}
+          <span style={{ fontSize: 11, color: C.muted }}>
+            {loading ? "updating..." : `${alarms.length} alarm${alarms.length !== 1 ? "s" : ""}`}
+          </span>
+          {stats?.compliant != null && (
+            <Badge color={stats.compliant ? "#fff" : "#000"} bg={stats.compliant ? C.green : C.red}>
+              ISA-18.2 {stats.compliant ? "COMPLIANT" : "NON-COMPLIANT"}
+            </Badge>
+          )}
+        </div>
       </div>
 
       {/* ISA-18.2 Stats */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 8, marginBottom: 16 }}>
         {[
           { label: "Standing", value: standing, color: standing > 0 ? C.red : C.green },
-          { label: "Active", value: stateCounts.ACTIVE || 0, color: C.red },
-          { label: "Acked", value: stateCounts.ACKED || 0, color: C.yellow },
-          { label: "RTN Unack", value: stateCounts.RTN_UNACK || 0, color: C.cyan },
-          { label: "Shelved", value: stateCounts.SHELVED || 0, color: C.purple },
-          { label: "Suppressed", value: stateCounts.SUPPRESSED || 0, color: C.dim },
+          { label: "Active", value: stats?.standing ?? 0, color: C.red },
+          { label: "Acked", value: stats?.acked ?? 0, color: C.yellow },
+          { label: "Shelved", value: stats?.shelved ?? 0, color: C.purple },
+          { label: "Suppressed", value: stats?.suppressed ?? 0, color: C.dim },
+          { label: "Raised/Hr", value: stats?.raised_last_hour ?? 0, color: (stats?.raised_last_hour ?? 0) > 6 ? C.red : C.green },
         ].map(m => (
           <div key={m.label} style={{ background: C.card, borderRadius: 8, border: `1px solid ${C.border}`, padding: "10px 12px", textAlign: "center" }}>
             <div style={{ fontSize: 10, color: C.muted, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 4 }}>{m.label}</div>
@@ -137,44 +160,47 @@ export default function AlarmManagement() {
 
       {/* Alarm Table */}
       <div style={{ background: C.card, borderRadius: 8, border: `1px solid ${C.border}`, overflow: "hidden" }}>
-        {/* Header row */}
         <div style={{
-          display: "grid", gridTemplateColumns: "50px 55px 80px 140px 100px 90px 80px 80px 60px 1fr",
+          display: "grid", gridTemplateColumns: "50px 55px 80px 140px 80px 80px 80px 60px 1fr",
           padding: "8px 12px", borderBottom: `1px solid ${C.border}`, fontSize: 10, color: C.muted,
           textTransform: "uppercase", letterSpacing: "0.5px", fontWeight: 700,
         }}>
-          <span>Pri</span><span>State</span><span>Subsystem</span><span>Tag</span><span>Value</span>
-          <span>Threshold</span><span>Raised</span><span>Operator</span><span>Actions</span><span>Detail</span>
+          <span>Pri</span><span>State</span><span>Subsystem</span><span>Tag</span>
+          <span>Raised</span><span>Operator</span><span>Block</span><span>Actions</span><span>Detail</span>
         </div>
 
-        {filtered.map(alarm => (
+        {sorted.length === 0 && (
+          <div style={{ padding: "24px 12px", textAlign: "center", color: C.dim, fontSize: 12 }}>
+            {loading ? "Loading alarms..." : "No alarms match the current filters"}
+          </div>
+        )}
+
+        {sorted.map(alarm => (
           <div key={alarm.id} style={{
-            display: "grid", gridTemplateColumns: "50px 55px 80px 140px 100px 90px 80px 80px 60px 1fr",
+            display: "grid", gridTemplateColumns: "50px 55px 80px 140px 80px 80px 80px 60px 1fr",
             padding: "8px 12px", borderBottom: `1px solid ${C.border}`,
             alignItems: "center",
-            background: alarm.state === "ACTIVE" && alarm.priority === "P0" ? "rgba(239,68,68,0.06)" : "transparent",
+            background: alarm.state === "ACTIVE" && (alarm.priority === "P0" || alarm.priority === "P1") ? "rgba(239,68,68,0.06)" : "transparent",
+            opacity: actionPending === alarm.id ? 0.5 : 1,
           }}>
-            <span><Badge color={PRIORITY[alarm.priority].color} bg={PRIORITY[alarm.priority].bg}>{alarm.priority}</Badge></span>
-            <span><Badge color={STATES[alarm.state]} bg="transparent">{alarm.state.slice(0, 4)}</Badge></span>
+            <span><Badge color={PRIORITY[alarm.priority]?.color || C.muted} bg={PRIORITY[alarm.priority]?.bg || C.border}>{alarm.priority}</Badge></span>
+            <span><Badge color={STATES[alarm.state] || C.dim} bg="transparent">{(alarm.state || "").slice(0, 4)}</Badge></span>
             <span style={{ fontSize: 10, color: C.muted }}>{alarm.subsystem}</span>
             <span style={{ fontSize: 12, fontFamily: "monospace", color: C.text, fontWeight: 600 }}>{alarm.tag}</span>
-            <span style={{ fontSize: 13, fontFamily: "monospace", fontWeight: 700, color: STATES[alarm.state] }}>
-              {alarm.last_value?.toFixed(1)} {alarm.threshold_direction === "HIGH" ? "▲" : "▼"}
-            </span>
-            <span style={{ fontSize: 11, fontFamily: "monospace", color: C.dim }}>{alarm.threshold_value}</span>
             <span style={{ fontSize: 10, color: C.muted }}>{timeAgo(alarm.raised_at)}</span>
             <span style={{ fontSize: 10, color: C.muted }}>
               {alarm.acked_by || alarm.shelved_by || "—"}
             </span>
+            <span style={{ fontSize: 10, color: C.dim, fontFamily: "monospace" }}>{alarm.block_id}</span>
             <span style={{ display: "flex", gap: 4 }}>
               {(alarm.state === "ACTIVE" || alarm.state === "RTN_UNACK") && (
-                <button onClick={() => handleAck(alarm)} style={{
+                <button onClick={() => handleAck(alarm)} disabled={actionPending === alarm.id} style={{
                   fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 3,
                   border: `1px solid ${C.green}`, background: "transparent", color: C.green, cursor: "pointer",
                 }}>ACK</button>
               )}
               {(alarm.state === "ACTIVE" || alarm.state === "ACKED") && (
-                <button onClick={() => setShelveId(alarm.id)} style={{
+                <button onClick={() => setShelveId(alarm.id)} disabled={actionPending === alarm.id} style={{
                   fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 3,
                   border: `1px solid ${C.purple}`, background: "transparent", color: C.purple, cursor: "pointer",
                 }}>SHV</button>
@@ -198,7 +224,7 @@ export default function AlarmManagement() {
             </div>
             <input value={shelveReason} onChange={e => setShelveReason(e.target.value)} placeholder="Reason (required, min 3 chars)" style={{
               width: "100%", padding: "10px 12px", borderRadius: 6, border: `1px solid ${C.border}`,
-              background: C.bg, color: C.text, fontSize: 13, marginBottom: 12,
+              background: C.bg, color: C.text, fontSize: 13, marginBottom: 12, outline: "none",
             }} />
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
               <button onClick={() => setShelveId(null)} style={{ padding: "8px 16px", borderRadius: 6, border: `1px solid ${C.border}`, background: "transparent", color: C.muted, cursor: "pointer" }}>Cancel</button>

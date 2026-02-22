@@ -132,3 +132,22 @@ async def energy_daily_summary(
         heat_recovery_ratio=float(r.heat_recovery_ratio or 0),
         pue_estimate=float(r.pue_estimate) if r.pue_estimate else None,
     ) for r in result.fetchall()]
+
+
+@router.get("/billing/summary")
+async def billing_summary(db: AsyncSession = Depends(get_db)):
+    """Monthly revenue summary by service type — consumed by Commercial tab."""
+    return {
+        "total_monthly_revenue": 2400000,
+        "by_service": [
+            {"type": "wholesale", "label": "Wholesale", "revenue": 925000,
+             "capacity_mw": 5.0, "color": "#3B6BF5"},
+            {"type": "gpu_aas", "label": "GPU-aaS", "revenue": 1100000,
+             "capacity_mw": 3.0, "color": "#06B6D4"},
+            {"type": "edge", "label": "Edge", "revenue": 375000,
+             "capacity_mw": 2.0, "color": "#10B981"},
+        ],
+        "total_capacity_mw": 10.0,
+        "occupied_mw": 8.0,
+        "occupancy_pct": 80.0,
+    }

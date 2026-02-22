@@ -8,6 +8,7 @@
 // ── Configuration ───────────────────────────────────────────────────────
 
 const API_BASE = import.meta?.env?.VITE_MCS_API_URL || "http://localhost:8000/api/v1";
+const API_ROOT = API_BASE.replace(/\/api\/v1$/, "");  // root-level endpoints
 const WS_BASE = import.meta?.env?.VITE_MCS_WS_URL || "ws://localhost:8000/api/v1";
 
 const DEFAULT_HEADERS = {
@@ -142,9 +143,22 @@ export const api = {
   energyDailySummary: (blockSlug, start, end) =>
     apiFetch(`/billing/energy-daily?block_slug=${blockSlug}&start=${start.toISOString()}&end=${end.toISOString()}`),
 
-  // Health
-  health: () => apiFetch("/health"),
-  stats: () => apiFetch("/stats"),
+  // ESG
+  esgSummary: (blockSlug = null) =>
+    apiFetch(`/esg/summary${blockSlug ? `?block_slug=${blockSlug}` : ''}`),
+
+  // Tenants
+  listTenants: () => apiFetch('/tenants'),
+
+  // Billing Summary
+  billingSummary: () => apiFetch('/billing/summary'),
+
+  // Connectivity
+  connectivity: () => apiFetch('/connectivity'),
+
+  // Health (root-level, no /api/v1 prefix)
+  health: () => fetch(`${API_ROOT}/health`).then(r => r.json()),
+  stats: () => fetch(`${API_ROOT}/stats`).then(r => r.json()),
 };
 
 

@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(head:*)",
+      "Bash(cd C:/Users/Dell/microlinkdc-mcs/dashboard && npx vite build 2>&1)",
+      "Bash(cd /c/Users/Dell/microlinkdc-mcs/dashboard && npx vite build 2>&1)"
+    ]
+  }
+}

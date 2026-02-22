@@ -47,7 +47,7 @@ class DeadLetterQueue:
                 await conn.execute(
                     text("""
                         INSERT INTO dead_letter_queue
-                            (received_at, mqtt_topic, raw_payload, error_category, error_message)
+                            (received_at, topic, payload, category, error_message)
                         VALUES
                             (:received_at, :topic, :payload, :category, :message)
                     """),

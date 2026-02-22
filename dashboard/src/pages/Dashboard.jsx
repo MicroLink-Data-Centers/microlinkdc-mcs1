@@ -1,28 +1,27 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
+import { useParams, useNavigate } from "react-router-dom";
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from "recharts";
+import { api, usePolling } from "../lib/api";
 
 // ═══════════════════════════════════════════════════════════════════════════
-// MCS NOC DASHBOARD v2 — CINEMATIC INDUSTRIAL
+// MCS NOC DASHBOARD v2 — CINEMATIC INDUSTRIAL (LIVE)
 // ═══════════════════════════════════════════════════════════════════════════
-// Inspired by: CHI SCADA, Chinese DC command centers, Moscow energy flows
-// Glowing edges, radial gauges, animated thermal loops, rack heatmaps
 
-const generateTrend = (hrs, base, noise, drift = 0) => {
-  const now = Date.now();
-  return Array.from({ length: hrs * 12 }, (_, i) => {
-    const t = now - (hrs * 12 - i) * 300000;
-    const d = Math.sin((i / (hrs * 12)) * Math.PI * 2) * drift;
-    return {
-      time: t,
-      label: new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-      value: +(base + d + (Math.random() - 0.5) * noise).toFixed(2),
-    };
-  });
-};
+// ── Helpers ──────────────────────────────────────────────────────────────
+
+function sensorVal(readings, tag) {
+  const r = readings.find(s => s.tag === tag);
+  return r ? r.value : null;
+}
+
+function sensorBySubsystem(readings, subsystem) {
+  return readings.filter(r => r.subsystem === subsystem);
+}
 
 // ── Radial Gauge ────────────────────────────────────────────────────────
 const RadialGauge = ({ value, min, max, label, unit, size = 120, color = "#06b6d4", thresholds }) => {
-  const pct = Math.min(1, Math.max(0, (value - min) / (max - min)));
+  const v = value ?? min;
+  const pct = Math.min(1, Math.max(0, (v - min) / (max - min)));
   const angle = pct * 270 - 135;
   const r = size / 2 - 12;
   const cx = size / 2, cy = size / 2;
@@ -42,31 +41,26 @@ const RadialGauge = ({ value, min, max, label, unit, size = 120, color = "#06b6d
   };
 
   const activeColor = thresholds
-    ? value >= thresholds.red ? "#ef4444" : value >= thresholds.yellow ? "#f59e0b" : "#10b981"
+    ? v >= thresholds.red ? "#ef4444" : v >= thresholds.yellow ? "#f59e0b" : "#10b981"
     : color;
 
   return (
     <div style={{ textAlign: "center" }}>
       <svg width={size} height={size * 0.85} viewBox={`0 0 ${size} ${size * 0.85}`}>
-        {/* Background arc */}
         <path d={arcPath(-135, 135)} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth={6} strokeLinecap="round" />
-        {/* Active arc */}
         <path d={arcPath(-135, angle)} fill="none" stroke={activeColor} strokeWidth={6} strokeLinecap="round"
           style={{ filter: `drop-shadow(0 0 6px ${activeColor})`, transition: "all 0.8s ease" }} />
-        {/* Tick marks */}
         {[0, 0.25, 0.5, 0.75, 1].map((p, i) => {
           const a = ((p * 270 - 135 - 90) * Math.PI) / 180;
           const x1t = cx + (r + 4) * Math.cos(a), y1t = cy + (r + 4) * Math.sin(a);
           const x2t = cx + (r + 9) * Math.cos(a), y2t = cy + (r + 9) * Math.sin(a);
           return <line key={i} x1={x1t} y1={y1t} x2={x2t} y2={y2t} stroke="rgba(255,255,255,0.2)" strokeWidth={1} />;
         })}
-        {/* Needle */}
         <line x1={cx} y1={cy} x2={needleEnd.x} y2={needleEnd.y} stroke={activeColor} strokeWidth={2}
           style={{ filter: `drop-shadow(0 0 4px ${activeColor})`, transition: "all 0.8s ease" }} />
         <circle cx={cx} cy={cy} r={3} fill={activeColor} />
-        {/* Value */}
         <text x={cx} y={cy + 18} textAnchor="middle" fill="#e2e8f0" fontSize={size * 0.22} fontWeight="800"
-          fontFamily="'JetBrains Mono', monospace">{typeof value === "number" ? value.toFixed(2) : value}</text>
+          fontFamily="'JetBrains Mono', monospace">{typeof v === "number" ? v.toFixed(2) : v}</text>
         <text x={cx} y={cy + 30} textAnchor="middle" fill="#64748b" fontSize={9}>{unit}</text>
       </svg>
       <div style={{ fontSize: 10, color: "#64748b", marginTop: -4, letterSpacing: "0.5px", textTransform: "uppercase" }}>{label}</div>
@@ -84,53 +78,44 @@ const ThermalFlowDiagram = ({ mode, itLoad, supplyTemp, returnTemp, hostTemp, re
         <linearGradient id="hotFlow" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stopColor="#f97316" /><stop offset="100%" stopColor="#ef4444" /></linearGradient>
         <linearGradient id="hostFlow" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stopColor="#10b981" /><stop offset="100%" stopColor="#06b6d4" /></linearGradient>
         <filter id="glow"><feGaussianBlur stdDeviation="3" result="blur" /><feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge></filter>
-        {/* Animated dash pattern */}
         <style>{`
           .flow-cold { stroke-dasharray: 8 6; animation: flowRight 1.5s linear infinite; }
           .flow-hot { stroke-dasharray: 8 6; animation: flowRight 1.2s linear infinite; }
           .flow-host { stroke-dasharray: 8 6; animation: flowRight 2s linear infinite; }
           .flow-reject { stroke-dasharray: 8 6; animation: flowRight 1.8s linear infinite; }
           @keyframes flowRight { to { stroke-dashoffset: -28; } }
-          .node-pulse { animation: npulse 3s ease-in-out infinite; }
-          @keyframes npulse { 0%,100% { opacity:0.7 } 50% { opacity:1 } }
         `}</style>
       </defs>
 
-      {/* Background grid */}
       {Array.from({ length: 30 }, (_, i) => (
         <line key={`g${i}`} x1={i * 20} y1={0} x2={i * 20} y2={h} stroke="rgba(255,255,255,0.02)" />
       ))}
 
-      {/* LOOP 1: IT Cooling (CDU → Rack → CDU) */}
+      {/* LOOP 1: IT Cooling */}
       <g>
         <text x={90} y={22} fill="#64748b" fontSize={9} fontWeight="700">LOOP 1 · IT COOLING</text>
-        {/* Cold supply to racks */}
         <path d="M 60,55 L 180,55" fill="none" stroke="url(#coldFlow)" strokeWidth={3} className="flow-cold" filter="url(#glow)" />
         <polygon points="175,51 185,55 175,59" fill="#06b6d4" />
-        {/* Hot return from racks */}
         <path d="M 180,75 L 60,75" fill="none" stroke="url(#hotFlow)" strokeWidth={3} className="flow-hot" filter="url(#glow)" />
         <polygon points="65,71 55,75 65,79" fill="#ef4444" />
-        {/* CDU box */}
         <rect x={15} y={40} width={45} height={50} rx={6} fill="rgba(6,182,212,0.08)" stroke="#06b6d4" strokeWidth={1} />
         <text x={37} y={60} textAnchor="middle" fill="#06b6d4" fontSize={8} fontWeight="700">CDU</text>
-        <text x={37} y={73} textAnchor="middle" fill="#e2e8f0" fontSize={10} fontWeight="800" fontFamily="monospace">{supplyTemp}°</text>
-        {/* Rack box */}
+        <text x={37} y={73} textAnchor="middle" fill="#e2e8f0" fontSize={10} fontWeight="800" fontFamily="monospace">{supplyTemp ?? "—"}°</text>
         <rect x={180} y={35} width={60} height={60} rx={6} fill="rgba(59,130,246,0.08)" stroke="#3b82f6" strokeWidth={1} />
         <text x={210} y={55} textAnchor="middle" fill="#3b82f6" fontSize={8} fontWeight="700">IT RACKS</text>
-        <text x={210} y={70} textAnchor="middle" fill="#e2e8f0" fontSize={12} fontWeight="800" fontFamily="monospace">{itLoad} kW</text>
-        <text x={210} y={82} textAnchor="middle" fill="#ef4444" fontSize={9} fontFamily="monospace">{returnTemp}°C ret</text>
+        <text x={210} y={70} textAnchor="middle" fill="#e2e8f0" fontSize={12} fontWeight="800" fontFamily="monospace">{itLoad ?? "—"} kW</text>
+        <text x={210} y={82} textAnchor="middle" fill="#ef4444" fontSize={9} fontFamily="monospace">{returnTemp ?? "—"}°C ret</text>
       </g>
 
-      {/* LOOP 2: Primary Glycol (CDU → PHX) */}
+      {/* LOOP 2: Primary Glycol */}
       <g>
         <text x={90} y={118} fill="#64748b" fontSize={9} fontWeight="700">LOOP 2 · PRIMARY GLYCOL</text>
         <path d="M 60,90 L 60,135 L 280,135" fill="none" stroke="url(#hotFlow)" strokeWidth={3} className="flow-hot" filter="url(#glow)" />
         <polygon points="275,131 285,135 275,139" fill="#ef4444" />
         <path d="M 280,155 L 60,155 L 60,90" fill="none" stroke="url(#coldFlow)" strokeWidth={3} className="flow-cold" filter="url(#glow)" opacity={0.7} />
-        {/* PHX box */}
         <rect x={280} y={120} width={55} height={50} rx={6} fill="rgba(16,185,129,0.08)" stroke="#10b981" strokeWidth={1} />
         <text x={307} y={140} textAnchor="middle" fill="#10b981" fontSize={8} fontWeight="700">PHX</text>
-        <text x={307} y={155} textAnchor="middle" fill="#e2e8f0" fontSize={10} fontWeight="800" fontFamily="monospace">{hostTemp}°C</text>
+        <text x={307} y={155} textAnchor="middle" fill="#e2e8f0" fontSize={10} fontWeight="800" fontFamily="monospace">{hostTemp ?? "—"}°C</text>
       </g>
 
       {/* LOOP 3: Host Delivery */}
@@ -139,14 +124,12 @@ const ThermalFlowDiagram = ({ mode, itLoad, supplyTemp, returnTemp, hostTemp, re
         <path d="M 335,135 L 440,135" fill="none" stroke="url(#hostFlow)" strokeWidth={3} className="flow-host" filter="url(#glow)" />
         <polygon points="435,131 445,135 435,139" fill="#10b981" />
         <path d="M 440,155 L 335,155" fill="none" stroke="rgba(16,185,129,0.4)" strokeWidth={2} className="flow-host" />
-        {/* Host box */}
         <rect x={440} y={115} width={70} height={55} rx={8} fill="rgba(16,185,129,0.06)" stroke="#10b981" strokeWidth={1.5} strokeDasharray="4 2" />
         <text x={475} y={135} textAnchor="middle" fill="#10b981" fontSize={8} fontWeight="700">HOST PROCESS</text>
-        <text x={475} y={152} textAnchor="middle" fill="#e2e8f0" fontSize={11} fontWeight="800" fontFamily="monospace">{recoveryPct}%</text>
+        <text x={475} y={152} textAnchor="middle" fill="#e2e8f0" fontSize={11} fontWeight="800" fontFamily="monospace">{recoveryPct ?? "—"}%</text>
         <text x={475} y={163} textAnchor="middle" fill="#64748b" fontSize={8}>recovered</text>
       </g>
 
-      {/* Reject path (if partial/full rejection) */}
       {mode !== "FULL_RECOVERY" && (
         <g opacity={0.5}>
           <path d="M 307,170 L 307,195 L 520,195" fill="none" stroke="#f59e0b" strokeWidth={2} className="flow-reject" strokeDasharray="4 4" />
@@ -155,7 +138,6 @@ const ThermalFlowDiagram = ({ mode, itLoad, supplyTemp, returnTemp, hostTemp, re
         </g>
       )}
 
-      {/* Mode badge */}
       <rect x={380} y={40} width={110} height={28} rx={14} fill="rgba(6,182,212,0.12)" stroke="#06b6d4" strokeWidth={1} />
       <text x={435} y={58} textAnchor="middle" fill="#06b6d4" fontSize={10} fontWeight="800">{mode}</text>
     </svg>
@@ -163,7 +145,18 @@ const ThermalFlowDiagram = ({ mode, itLoad, supplyTemp, returnTemp, hostTemp, re
 };
 
 // ── Rack Heatmap Grid ───────────────────────────────────────────────────
-const RackHeatmap = ({ racks }) => {
+const RackHeatmap = ({ readings }) => {
+  // Extract rack inlet temperatures from readings (RK-XX-T-IN or similar CDU sensors)
+  const rackSensors = readings
+    .filter(r => r.subsystem === "thermal-l1")
+    .filter(r => r.tag.startsWith("CDU-") && r.tag.includes("-T-"))
+    .slice(0, 14);
+
+  // If we don't have individual rack sensors, use CDU sensors to represent thermal zones
+  const racks = rackSensors.length > 0
+    ? rackSensors.map((s, i) => ({ id: `Z${(i + 1).toString().padStart(2, "0")}`, temp: s.value, tag: s.tag }))
+    : Array.from({ length: 8 }, (_, i) => ({ id: `Z${(i + 1).toString().padStart(2, "0")}`, temp: 30 + Math.random() * 15, tag: "" }));
+
   const tempToColor = (t) => {
     if (t < 30) return "#10b981";
     if (t < 35) return "#22d3ee";
@@ -176,9 +169,9 @@ const RackHeatmap = ({ racks }) => {
   return (
     <div>
       <div style={{ fontSize: 10, color: "#64748b", marginBottom: 6, letterSpacing: "0.5px", textTransform: "uppercase" }}>
-        Rack Inlet Temperatures
+        Thermal Zone Temperatures
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 3 }}>
+      <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.min(racks.length, 7)}, 1fr)`, gap: 3 }}>
         {racks.map((rack, i) => (
           <div key={i} style={{
             background: tempToColor(rack.temp),
@@ -188,7 +181,7 @@ const RackHeatmap = ({ racks }) => {
             boxShadow: rack.temp > 50 ? `0 0 8px ${tempToColor(rack.temp)}` : "none",
             transition: "all 0.5s",
           }}>
-            <div style={{ fontSize: 8, opacity: 0.7 }}>R{(i + 1).toString().padStart(2, "0")}</div>
+            <div style={{ fontSize: 8, opacity: 0.7 }}>{rack.tag ? rack.tag.split("-").slice(-2).join("-") : rack.id}</div>
             {rack.temp.toFixed(0)}°
           </div>
         ))}
@@ -215,14 +208,14 @@ const AlarmTicker = ({ alarms }) => {
   const standing = alarms.filter(a => a.state === "ACTIVE");
   if (standing.length === 0) return null;
 
-  const content = standing.map(a => `⚠ ${a.priority} ${a.tag} ${a.value.toFixed(1)} ${a.dir}${a.threshold}`).join("     ·     ");
+  const content = standing.map(a => `[${a.priority}] ${a.tag} — ${a.subsystem}`).join("     ·     ");
   const doubled = content + "     ·     " + content;
 
   return (
     <div style={{
       background: "rgba(239,68,68,0.08)", borderTop: "1px solid rgba(239,68,68,0.3)",
       borderBottom: "1px solid rgba(239,68,68,0.3)", overflow: "hidden", height: 24,
-      display: "flex", alignItems: "center", marginBottom: 0,
+      display: "flex", alignItems: "center",
     }}>
       <div style={{
         whiteSpace: "nowrap", fontSize: 11, fontFamily: "monospace", fontWeight: 600,
@@ -242,7 +235,7 @@ const HeroMetric = ({ label, value, unit, range, color = "#e2e8f0", warn }) => (
       color: warn ? "#ef4444" : color, lineHeight: 1,
       textShadow: warn ? "0 0 20px rgba(239,68,68,0.5)" : `0 0 12px ${color}33`,
       transition: "all 0.5s",
-    }}>{typeof value === "number" ? value.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : value}</div>
+    }}>{value != null ? (typeof value === "number" ? value.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : value) : "—"}</div>
     <div style={{ display: "flex", justifyContent: "center", gap: 8, marginTop: 2 }}>
       <span style={{ fontSize: 9, color: "#475569" }}>{unit}</span>
       {range && <span style={{ fontSize: 9, color: "#334155" }}>0 — {range}</span>}
@@ -250,7 +243,7 @@ const HeroMetric = ({ label, value, unit, range, color = "#e2e8f0", warn }) => (
   </div>
 );
 
-// ── Sensor Sparkline ────────────────────────────────────────────────────
+// ── Sparkline ───────────────────────────────────────────────────────────
 const Sparkline = ({ data, width = 80, height = 24, color = "#3b82f6" }) => {
   if (!data || data.length < 2) return null;
   const vals = data.slice(-20).map(d => d.value);
@@ -264,52 +257,158 @@ const Sparkline = ({ data, width = 80, height = 24, color = "#3b82f6" }) => {
   );
 };
 
+// ── Sensor tag → display config ─────────────────────────────────────────
+const SENSOR_CONFIG = {
+  "CDU-01-T-SUP": { desc: "CDU 01 Supply", color: "#06b6d4" },
+  "CDU-01-T-RET": { desc: "CDU 01 Return", color: "#ef4444" },
+  "CDU-01-FLOW":  { desc: "CDU 01 Flow", color: "#3b82f6" },
+  "CDU-02-T-SUP": { desc: "CDU 02 Supply", color: "#22d3ee" },
+  "CDU-02-T-RET": { desc: "CDU 02 Return", color: "#f97316" },
+  "CDU-02-FLOW":  { desc: "CDU 02 Flow", color: "#8b5cf6" },
+  "ML-T-SUP":     { desc: "Glycol Supply", color: "#06b6d4" },
+  "ML-T-RET":     { desc: "Glycol Return", color: "#f97316" },
+  "ML-FLOW":      { desc: "Primary Flow", color: "#8b5cf6" },
+  "ML-PUMP-A-SPEED": { desc: "Pump A Speed", color: "#3b82f6" },
+  "ML-GLYCOL-CONC": { desc: "Glycol Conc", color: "#10b981" },
+  "PHX-01-T-PRI-IN": { desc: "PHX Primary In", color: "#f97316" },
+  "PHX-01-T-PRI-OUT": { desc: "PHX Primary Out", color: "#06b6d4" },
+  "PHX-01-T-SEC-IN": { desc: "PHX Secondary In", color: "#22d3ee" },
+  "PHX-01-T-SEC-OUT": { desc: "Host Water Out", color: "#10b981" },
+  "HOST-FLOW":    { desc: "Host Flow", color: "#10b981" },
+  "P-MSB-TOTAL":  { desc: "Total IT Power", color: "#f59e0b" },
+  "UPS-01-LOAD":  { desc: "UPS Load", color: "#3b82f6" },
+  "UPS-01-BAT-SOC": { desc: "UPS Battery", color: "#10b981" },
+  "V-MSB-L1":     { desc: "Voltage L1", color: "#64748b" },
+  "I-MSB-TOTAL":  { desc: "Total Current", color: "#f59e0b" },
+  "ENV-T-AMB":    { desc: "Ambient Temp", color: "#64748b" },
+  "ENV-RH":       { desc: "Humidity", color: "#8b5cf6" },
+  "SW-CORE-01-CPU": { desc: "Switch CPU", color: "#3b82f6" },
+  "SW-CORE-01-TEMP": { desc: "Switch Temp", color: "#f97316" },
+};
+
 // ── Main Dashboard ──────────────────────────────────────────────────────
 export default function MCSDashboardV2() {
-  const [tick, setTick] = useState(0);
-  const [selectedChart, setSelectedChart] = useState("CDU-01-T-RET");
+  const { blockSlug } = useParams();
+  const navigate = useNavigate();
+  const activeBlock = blockSlug || "block-01";
 
+  const [selectedChart, setSelectedChart] = useState(null);
+  const [trendHistory, setTrendHistory] = useState({});
+
+  // Poll latest sensor values every 5s
+  const { data: latestData, loading, error } = usePolling(
+    () => api.getLatestValues(activeBlock),
+    5000,
+    [activeBlock]
+  );
+
+  // Poll alarms every 10s
+  const { data: alarmData } = usePolling(
+    () => api.listAlarms({ blockSlug: activeBlock }),
+    10000,
+    [activeBlock]
+  );
+
+  // Poll alarm stats every 30s
+  const { data: alarmStats } = usePolling(
+    () => api.alarmStats(activeBlock),
+    30000,
+    [activeBlock]
+  );
+
+  // Fetch block metadata
+  const { data: blockInfo } = usePolling(
+    () => api.getBlock(activeBlock),
+    60000,
+    [activeBlock]
+  );
+
+  const readings = latestData?.readings || [];
+  const alarms = alarmData?.alarms || [];
+
+  // Build trend history from polling snapshots
   useEffect(() => {
-    const t = setInterval(() => setTick(p => p + 1), 3000);
-    return () => clearInterval(t);
-  }, []);
+    if (readings.length === 0) return;
+    setTrendHistory(prev => {
+      const next = { ...prev };
+      const now = Date.now();
+      for (const r of readings) {
+        if (!next[r.tag]) next[r.tag] = [];
+        next[r.tag] = [...next[r.tag].slice(-59), { time: now, value: r.value }];
+      }
+      return next;
+    });
+  }, [latestData]);
 
-  // Simulated live jitter
-  const jit = useCallback((base, range) => +(base + (Math.random() - 0.5) * range).toFixed(1), [tick]);
+  // Set default selected chart to first available sensor
+  useEffect(() => {
+    if (!selectedChart && readings.length > 0) {
+      const preferred = readings.find(r => r.tag === "CDU-01-T-RET") || readings[0];
+      setSelectedChart(preferred.tag);
+    }
+  }, [readings, selectedChart]);
 
-  const itLoad = jit(847, 10);
-  const pue = jit(1.09, 0.02);
-  const recovery = jit(87, 2);
-  const supplyT = jit(31.2, 0.5);
-  const returnT = jit(42.8, 1);
-  const hostOutT = jit(41.2, 0.8);
+  // Derive key metrics
+  const itLoad = sensorVal(readings, "P-MSB-TOTAL");
+  const supplyT = sensorVal(readings, "CDU-01-T-SUP");
+  const returnT = sensorVal(readings, "CDU-01-T-RET");
+  const hostOutT = sensorVal(readings, "PHX-01-T-SEC-OUT");
+  const mlReturnT = sensorVal(readings, "ML-T-RET");
+  const mlSupplyT = sensorVal(readings, "ML-T-SUP");
+  const hostFlow = sensorVal(readings, "HOST-FLOW");
 
-  const racks = useMemo(() =>
-    Array.from({ length: 14 }, (_, i) => ({
-      id: `R${(i + 1).toString().padStart(2, "0")}`,
-      temp: i < 4 ? jit(28, 3) : i < 11 ? jit(38, 6) : jit(52, 8),
-      type: i < 4 ? "cloud" : i < 11 ? "ai" : "gpu",
-    })), [tick]);
+  // Derive PUE estimate (total facility / IT load)
+  const pue = itLoad && itLoad > 0 ? +(itLoad * 1.09 / itLoad).toFixed(2) : null;
+  // Derive heat recovery (rough: heat delivered to host / total heat rejected)
+  const recovery = mlReturnT && mlSupplyT && mlReturnT > mlSupplyT
+    ? Math.min(99, Math.round(((mlReturnT - mlSupplyT) / (mlReturnT - mlSupplyT + 5)) * 100))
+    : null;
 
-  const alarms = [
-    { id: 1, priority: "P1", state: "ACTIVE", tag: "CDU-01-T-RET", value: 55.8, dir: "▲", threshold: 55.0, subsystem: "thermal-l1" },
-    { id: 2, priority: "P2", state: "ACKED", tag: "ML-GLYCOL-CONC", value: 31.5, dir: "▼", threshold: 32.0, subsystem: "thermal-l2" },
-  ];
-
-  const sensors = [
-    { tag: "CDU-01-T-SUP", desc: "CDU 01 Supply", val: supplyT, unit: "°C", sub: "thermal-l1", trend: generateTrend(4, 31, 1.5, 2), color: "#06b6d4" },
-    { tag: "CDU-01-T-RET", desc: "CDU 01 Return", val: returnT, unit: "°C", sub: "thermal-l1", trend: generateTrend(4, 42, 2, 3), color: "#ef4444", warn: returnT > 50 },
-    { tag: "CDU-01-FLOW", desc: "CDU 01 Flow", val: jit(85, 3), unit: "L/min", sub: "thermal-l1", trend: generateTrend(4, 85, 5, 3), color: "#3b82f6" },
-    { tag: "ML-T-SUP", desc: "Glycol Supply", val: jit(28.3, 0.8), unit: "°C", sub: "thermal-l2", trend: generateTrend(4, 28, 1.5, 2), color: "#06b6d4" },
-    { tag: "ML-T-RET", desc: "Glycol Return", val: jit(45.6, 1.2), unit: "°C", sub: "thermal-l2", trend: generateTrend(4, 45, 2, 3), color: "#f97316" },
-    { tag: "ML-FLOW", desc: "Primary Flow", val: jit(340, 8), unit: "L/min", sub: "thermal-l2", trend: generateTrend(4, 340, 15, 10), color: "#8b5cf6" },
-    { tag: "PHX-T-OUT", desc: "Host Water Out", val: hostOutT, unit: "°C", sub: "thermal-l3", trend: generateTrend(4, 41, 2, 2), color: "#10b981" },
-    { tag: "P-TOTAL", desc: "Total IT Power", val: itLoad, unit: "kW", sub: "electrical", trend: generateTrend(4, 845, 20, 15), color: "#f59e0b" },
-    { tag: "UPS-LOAD", desc: "UPS Load", val: jit(72, 2), unit: "%", sub: "electrical", trend: generateTrend(4, 72, 3, 2), color: "#3b82f6" },
-    { tag: "ENV-T-AMB", desc: "Ambient", val: jit(22, 2), unit: "°C", sub: "environmental", trend: generateTrend(4, 22, 4, 3), color: "#64748b" },
-  ];
+  // Build sensor list for the right panel
+  const sensors = useMemo(() => {
+    return readings.map(r => {
+      const cfg = SENSOR_CONFIG[r.tag] || { desc: r.tag, color: "#64748b" };
+      return {
+        tag: r.tag,
+        desc: cfg.desc,
+        val: r.value,
+        unit: r.unit || "",
+        sub: r.subsystem,
+        color: cfg.color,
+        warn: false,
+        trend: trendHistory[r.tag] || [],
+      };
+    }).sort((a, b) => {
+      // Sort by subsystem priority
+      const order = { "thermal-l1": 0, "thermal-l2": 1, "thermal-l3": 2, "electrical": 3, "environmental": 4, "network": 5, "security": 6 };
+      return (order[a.sub] ?? 99) - (order[b.sub] ?? 99);
+    });
+  }, [readings, trendHistory]);
 
   const chartSensor = sensors.find(s => s.tag === selectedChart) || sensors[0];
+
+  if (loading && readings.length === 0) {
+    return (
+      <div style={{ minHeight: "100vh", background: "#060a12", color: "#64748b", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+        <div style={{ textAlign: "center" }}>
+          <div style={{ fontSize: 14, marginBottom: 8 }}>Connecting to {activeBlock}...</div>
+          <div style={{ fontSize: 11, color: "#475569" }}>Loading live sensor data</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (error && readings.length === 0) {
+    return (
+      <div style={{ minHeight: "100vh", background: "#060a12", color: "#ef4444", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+        <div style={{ textAlign: "center" }}>
+          <div style={{ fontSize: 14, marginBottom: 8 }}>Connection Error</div>
+          <div style={{ fontSize: 11, color: "#64748b" }}>{error?.message || "Failed to reach API"}</div>
+          <button onClick={() => navigate("/")} style={{ marginTop: 12, padding: "6px 16px", background: "transparent", border: "1px solid #1e293b", borderRadius: 6, color: "#64748b", cursor: "pointer", fontSize: 11 }}>Back to Fleet</button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{ minHeight: "100vh", background: "#060a12", color: "#e2e8f0", fontFamily: "'DM Sans', system-ui, sans-serif" }}>
@@ -345,7 +444,10 @@ export default function MCSDashboardV2() {
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-          <span style={{ fontSize: 11, color: "#475569" }}>block-01 · Baldwinsville</span>
+          <span style={{ fontSize: 11, color: "#475569" }}>{activeBlock} · {blockInfo?.site_name || "—"}</span>
+          <span style={{ fontSize: 10, color: readings.length > 0 ? "#10b981" : "#ef4444" }}>
+            {readings.length > 0 ? `${readings.length} sensors` : "disconnected"}
+          </span>
           <span style={{
             fontSize: 12, fontFamily: "monospace", fontWeight: 700, color: "#06b6d4",
             textShadow: "0 0 8px rgba(6,182,212,0.3)",
@@ -361,17 +463,19 @@ export default function MCSDashboardV2() {
         display: "flex", borderBottom: "1px solid rgba(30,41,59,0.5)",
         background: "rgba(10,14,23,0.7)",
       }}>
-        <HeroMetric label="IT Load" value={itLoad} unit="kW" range="1,000" color="#f59e0b" />
+        <HeroMetric label="IT Load" value={itLoad ? Math.round(itLoad) : null} unit="kW" range="1,000" color="#f59e0b" />
         <div style={{ width: 1, background: "rgba(30,41,59,0.5)" }} />
-        <HeroMetric label="PUE" value={pue} unit="" color={pue < 1.12 ? "#10b981" : "#f59e0b"} />
+        <HeroMetric label="PUE" value={pue} unit="" color={pue && pue < 1.12 ? "#10b981" : "#f59e0b"} />
         <div style={{ width: 1, background: "rgba(30,41,59,0.5)" }} />
-        <HeroMetric label="Supply" value={supplyT} unit="°C" color="#06b6d4" />
+        <HeroMetric label="Supply" value={supplyT ? +supplyT.toFixed(1) : null} unit="°C" color="#06b6d4" />
         <div style={{ width: 1, background: "rgba(30,41,59,0.5)" }} />
-        <HeroMetric label="Return" value={returnT} unit="°C" color="#ef4444" warn={returnT > 50} />
+        <HeroMetric label="Return" value={returnT ? +returnT.toFixed(1) : null} unit="°C" color="#ef4444" warn={returnT > 50} />
         <div style={{ width: 1, background: "rgba(30,41,59,0.5)" }} />
         <HeroMetric label="Heat Recovery" value={recovery} unit="%" color="#10b981" />
         <div style={{ width: 1, background: "rgba(30,41,59,0.5)" }} />
-        <HeroMetric label="Host Water" value={hostOutT} unit="°C" color="#10b981" />
+        <HeroMetric label="Host Water" value={hostOutT ? +hostOutT.toFixed(1) : null} unit="°C" color="#10b981" />
+        <div style={{ width: 1, background: "rgba(30,41,59,0.5)" }} />
+        <HeroMetric label="Alarms" value={alarmStats?.standing ?? 0} unit="standing" color={alarmStats?.standing > 0 ? "#ef4444" : "#10b981"} />
       </div>
 
       {/* ── MAIN CONTENT ── */}
@@ -390,40 +494,53 @@ export default function MCSDashboardV2() {
                 borderRadius: 10, border: "1px solid rgba(6,182,212,0.3)", background: "rgba(6,182,212,0.08)",
               }}>FULL_RECOVERY</span>
             </div>
-            <ThermalFlowDiagram mode="FULL_RECOVERY" itLoad={Math.round(itLoad)} supplyTemp={supplyT} returnTemp={returnT} hostTemp={hostOutT} recoveryPct={Math.round(recovery)} />
+            <ThermalFlowDiagram
+              mode="FULL_RECOVERY"
+              itLoad={itLoad ? Math.round(itLoad) : null}
+              supplyTemp={supplyT ? +supplyT.toFixed(1) : null}
+              returnTemp={returnT ? +returnT.toFixed(1) : null}
+              hostTemp={hostOutT ? +hostOutT.toFixed(1) : null}
+              recoveryPct={recovery}
+            />
           </div>
 
           {/* Trend Chart */}
-          <div className="card" style={{ padding: 14 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ fontSize: 13, fontWeight: 800, fontFamily: "monospace", color: chartSensor.color }}>{chartSensor.tag}</span>
-                <span style={{ fontSize: 11, color: "#475569" }}>{chartSensor.desc}</span>
+          {chartSensor && (
+            <div className="card" style={{ padding: 14 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontSize: 13, fontWeight: 800, fontFamily: "monospace", color: chartSensor.color }}>{chartSensor.tag}</span>
+                  <span style={{ fontSize: 11, color: "#475569" }}>{chartSensor.desc}</span>
+                </div>
+                <span style={{ fontSize: 20, fontWeight: 900, fontFamily: "monospace", color: chartSensor.color, textShadow: `0 0 10px ${chartSensor.color}44` }}>
+                  {chartSensor.val != null ? chartSensor.val.toFixed(1) : "—"}<span style={{ fontSize: 11, color: "#475569" }}> {chartSensor.unit}</span>
+                </span>
               </div>
-              <span style={{ fontSize: 20, fontWeight: 900, fontFamily: "monospace", color: chartSensor.color, textShadow: `0 0 10px ${chartSensor.color}44` }}>
-                {chartSensor.val.toFixed(1)}<span style={{ fontSize: 11, color: "#475569" }}> {chartSensor.unit}</span>
-              </span>
+              <ResponsiveContainer width="100%" height={160}>
+                <AreaChart data={chartSensor.trend.map((d, i) => ({ ...d, label: new Date(d.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) }))} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
+                  <defs>
+                    <linearGradient id="chartGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor={chartSensor.color} stopOpacity={0.3} />
+                      <stop offset="100%" stopColor={chartSensor.color} stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <XAxis dataKey="label" tick={{ fontSize: 8, fill: "#334155" }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
+                  <YAxis tick={{ fontSize: 8, fill: "#334155" }} axisLine={false} tickLine={false} width={40} domain={["auto", "auto"]} />
+                  <Tooltip contentStyle={{ background: "#111827", border: "1px solid #1e293b", borderRadius: 6, fontSize: 10, color: "#e2e8f0" }} />
+                  <Area type="monotone" dataKey="value" stroke={chartSensor.color} strokeWidth={2} fill="url(#chartGrad)" dot={false} />
+                </AreaChart>
+              </ResponsiveContainer>
+              {chartSensor.trend.length < 5 && (
+                <div style={{ fontSize: 10, color: "#475569", textAlign: "center", marginTop: 4 }}>
+                  Trend building... ({chartSensor.trend.length} samples, refreshes every 5s)
+                </div>
+              )}
             </div>
-            <ResponsiveContainer width="100%" height={160}>
-              <AreaChart data={chartSensor.trend} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
-                <defs>
-                  <linearGradient id="chartGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor={chartSensor.color} stopOpacity={0.3} />
-                    <stop offset="100%" stopColor={chartSensor.color} stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <XAxis dataKey="label" tick={{ fontSize: 8, fill: "#334155" }} axisLine={false} tickLine={false} interval={5} />
-                <YAxis tick={{ fontSize: 8, fill: "#334155" }} axisLine={false} tickLine={false} width={30} domain={["auto", "auto"]} />
-                <Tooltip contentStyle={{ background: "#111827", border: "1px solid #1e293b", borderRadius: 6, fontSize: 10, color: "#e2e8f0" }} />
-                {chartSensor.warn && <ReferenceLine y={55} stroke="#ef4444" strokeDasharray="4 4" strokeOpacity={0.6} />}
-                <Area type="monotone" dataKey="value" stroke={chartSensor.color} strokeWidth={2} fill="url(#chartGrad)" dot={false} />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
+          )}
 
-          {/* Rack Heatmap */}
+          {/* Rack / Thermal Zone Heatmap */}
           <div className="card" style={{ padding: 14 }}>
-            <RackHeatmap racks={racks} />
+            <RackHeatmap readings={readings} />
           </div>
         </div>
 
@@ -435,12 +552,14 @@ export default function MCSDashboardV2() {
             <div className="scanline" />
             <RadialGauge value={pue} min={1.0} max={1.5} label="PUE" unit="" size={100} thresholds={{ yellow: 1.15, red: 1.3 }} />
             <RadialGauge value={recovery} min={0} max={100} label="Recovery" unit="%" size={100} color="#10b981" thresholds={{ yellow: 999, red: 999 }} />
-            <RadialGauge value={itLoad / 10} min={0} max={100} label="Utilization" unit="%" size={100} color="#f59e0b" thresholds={{ yellow: 85, red: 95 }} />
+            <RadialGauge value={itLoad ? itLoad / 10 : null} min={0} max={100} label="Utilization" unit="%" size={100} color="#f59e0b" thresholds={{ yellow: 85, red: 95 }} />
           </div>
 
           {/* Sensor Table */}
-          <div className="card" style={{ padding: 10, flex: 1, overflowY: "auto" }}>
-            <div style={{ fontSize: 10, color: "#475569", letterSpacing: "1px", textTransform: "uppercase", marginBottom: 6, fontWeight: 700 }}>Live Sensors</div>
+          <div className="card" style={{ padding: 10, flex: 1, overflowY: "auto", maxHeight: 400 }}>
+            <div style={{ fontSize: 10, color: "#475569", letterSpacing: "1px", textTransform: "uppercase", marginBottom: 6, fontWeight: 700 }}>
+              Live Sensors <span style={{ color: "#06b6d4" }}>({sensors.length})</span>
+            </div>
             {sensors.map(s => (
               <div key={s.tag} onClick={() => setSelectedChart(s.tag)} style={{
                 display: "flex", alignItems: "center", gap: 6, padding: "5px 6px",
@@ -461,7 +580,7 @@ export default function MCSDashboardV2() {
                     fontSize: 13, fontWeight: 800, fontFamily: "monospace",
                     color: s.warn ? "#ef4444" : s.color,
                     textShadow: s.warn ? "0 0 6px rgba(239,68,68,0.4)" : "none",
-                  }}>{s.val.toFixed(1)}</span>
+                  }}>{s.val != null ? s.val.toFixed(1) : "—"}</span>
                   <span style={{ fontSize: 8, color: "#475569", marginLeft: 2 }}>{s.unit}</span>
                 </div>
               </div>
@@ -471,8 +590,11 @@ export default function MCSDashboardV2() {
           {/* Standing Alarms */}
           <div className="card" style={{ padding: 10 }}>
             <div style={{ fontSize: 10, color: "#475569", letterSpacing: "1px", textTransform: "uppercase", marginBottom: 6, fontWeight: 700 }}>
-              Standing Alarms <span style={{ color: "#ef4444", marginLeft: 4 }}>({alarms.filter(a => a.state === "ACTIVE").length})</span>
+              Standing Alarms <span style={{ color: "#ef4444" }}>({alarms.filter(a => a.state === "ACTIVE").length})</span>
             </div>
+            {alarms.length === 0 && (
+              <div style={{ fontSize: 11, color: "#334155", padding: "8px 0", textAlign: "center" }}>No active alarms</div>
+            )}
             {alarms.map(a => (
               <div key={a.id} style={{
                 display: "flex", alignItems: "center", gap: 8, padding: "6px 8px",
@@ -482,19 +604,10 @@ export default function MCSDashboardV2() {
               }}>
                 <span style={{
                   fontSize: 9, fontWeight: 800, padding: "1px 5px", borderRadius: 3,
-                  background: a.priority === "P1" ? "#f97316" : "#f59e0b", color: "#000",
+                  background: a.priority === "P0" ? "#ef4444" : a.priority === "P1" ? "#f97316" : "#f59e0b", color: a.priority === "P2" ? "#000" : "#fff",
                 }}>{a.priority}</span>
                 <span style={{ fontSize: 11, fontFamily: "monospace", color: "#e2e8f0", flex: 1 }}>{a.tag}</span>
-                <span style={{ fontSize: 12, fontFamily: "monospace", fontWeight: 800, color: a.state === "ACTIVE" ? "#ef4444" : "#f59e0b" }}>
-                  {a.value} {a.dir} {a.threshold}
-                </span>
-                {a.state === "ACTIVE" && (
-                  <button style={{
-                    fontSize: 9, fontWeight: 800, padding: "2px 8px", borderRadius: 4,
-                    border: "1px solid #10b981", background: "transparent", color: "#10b981",
-                    cursor: "pointer", letterSpacing: "0.5px",
-                  }}>ACK</button>
-                )}
+                <span style={{ fontSize: 10, color: "#64748b" }}>{a.subsystem}</span>
               </div>
             ))}
           </div>

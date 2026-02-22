@@ -1,0 +1,690 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MCS · Connectivity · Network Topology</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --bg: #f0f4fa;
+    --card: #ffffff;
+    --border: #e2e8f4;
+    --blue: #1a6fff;
+    --blue-light: #e8f0ff;
+    --blue-mid: #4a90ff;
+    --teal: #00b4d8;
+    --green: #10b981;
+    --orange: #f59e0b;
+    --red: #ef4444;
+    --text-primary: #0f172a;
+    --text-secondary: #5a6a88;
+    --text-muted: #94a3b8;
+    --shadow: 0 2px 12px rgba(26,111,255,0.08);
+    --shadow-md: 0 4px 20px rgba(26,111,255,0.12);
+  }
+
+  body {
+    background: var(--bg);
+    font-family: 'DM Sans', sans-serif;
+    color: var(--text-primary);
+    padding: 24px;
+    min-height: 100vh;
+  }
+
+  /* Header */
+  .header {
+    margin-bottom: 20px;
+  }
+
+  .header-title {
+    font-size: 22px;
+    font-weight: 600;
+    color: var(--text-primary);
+    letter-spacing: -0.3px;
+  }
+
+  .header-sub {
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin-top: 3px;
+    font-family: 'DM Mono', monospace;
+  }
+
+  /* KPI Row */
+  .kpi-row {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+
+  .kpi-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px;
+    box-shadow: var(--shadow);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .kpi-icon {
+    font-size: 18px;
+    margin-bottom: 2px;
+  }
+
+  .kpi-val {
+    font-size: 24px;
+    font-weight: 600;
+    color: var(--blue);
+    letter-spacing: -0.5px;
+    font-family: 'DM Mono', monospace;
+    line-height: 1;
+  }
+
+  .kpi-val.green { color: var(--green); }
+  .kpi-val.orange { color: var(--orange); }
+  .kpi-val.teal { color: var(--teal); }
+
+  .kpi-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-weight: 500;
+    letter-spacing: 0.3px;
+  }
+
+  /* Main layout */
+  .main-layout {
+    display: grid;
+    grid-template-columns: 1fr 280px;
+    gap: 16px;
+  }
+
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 20px;
+    box-shadow: var(--shadow);
+  }
+
+  .card-title {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+    letter-spacing: 1.2px;
+    text-transform: uppercase;
+    margin-bottom: 16px;
+    font-family: 'DM Mono', monospace;
+  }
+
+  /* Network topology SVG */
+  #topology {
+    width: 100%;
+    height: auto;
+  }
+
+  /* Right column */
+  .right-col {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  /* Carrier table */
+  .carrier-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+  }
+
+  .carrier-row:last-child { border-bottom: none; }
+
+  .carrier-name { font-weight: 500; color: var(--text-primary); }
+  .carrier-cap { color: var(--text-secondary); font-family: 'DM Mono', monospace; font-size: 12px; }
+
+  .status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--green);
+    flex-shrink: 0;
+    box-shadow: 0 0 6px rgba(16,185,129,0.5);
+  }
+
+  .carrier-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  /* Latency rows */
+  .latency-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+  }
+
+  .latency-row:last-child { border-bottom: none; }
+
+  .cloud-name {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--text-secondary);
+    font-weight: 500;
+  }
+
+  .cloud-icon {
+    width: 24px;
+    height: 24px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    flex-shrink: 0;
+  }
+
+  .aws { background: #fff3e0; color: #f59e0b; }
+  .azure { background: #e3f0ff; color: #1a6fff; }
+  .gcp { background: #fff0f0; color: #ef4444; }
+
+  .latency-val {
+    font-family: 'DM Mono', monospace;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--green);
+  }
+
+  /* Bandwidth bars */
+  .bw-row {
+    margin-bottom: 12px;
+  }
+
+  .bw-header {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    margin-bottom: 6px;
+  }
+
+  .bw-name { color: var(--text-secondary); font-weight: 500; }
+  .bw-val { font-family: 'DM Mono', monospace; color: var(--text-primary); font-size: 11px; }
+
+  .bw-track {
+    height: 6px;
+    background: var(--blue-light);
+    border-radius: 99px;
+    overflow: hidden;
+  }
+
+  .bw-fill {
+    height: 100%;
+    border-radius: 99px;
+    background: linear-gradient(90deg, var(--blue), var(--blue-mid));
+    transition: width 1s ease;
+  }
+
+  .bw-fill.high { background: linear-gradient(90deg, #f59e0b, #ef4444); }
+
+  /* Live badge */
+  .live-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    background: #e8fff4;
+    border: 1px solid #a7f3d0;
+    border-radius: 20px;
+    padding: 3px 10px;
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--green);
+    font-family: 'DM Mono', monospace;
+    letter-spacing: 0.5px;
+    float: right;
+  }
+
+  .live-dot {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: var(--green);
+    animation: blink 1.5s infinite;
+  }
+
+  @keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.2; }
+  }
+
+  /* Tooltip */
+  .tooltip {
+    position: absolute;
+    background: white;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 11px;
+    color: var(--text-secondary);
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.15s;
+    z-index: 10;
+    box-shadow: var(--shadow-md);
+    white-space: nowrap;
+  }
+
+  .tooltip.visible { opacity: 1; }
+  .tooltip .tt-name { font-weight: 600; color: var(--text-primary); font-size: 12px; margin-bottom: 3px; }
+
+  .topology-wrap {
+    position: relative;
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div style="display:flex; align-items:center; justify-content:space-between;">
+    <div>
+      <div class="header-title">Connectivity · Network Topology</div>
+      <div class="header-sub">Carrier Status, Latency & Bandwidth Utilization · Newtown Creek</div>
+    </div>
+    <span class="live-badge"><span class="live-dot"></span>LIVE</span>
+  </div>
+</div>
+
+<!-- KPI Row -->
+<div class="kpi-row">
+  <div class="kpi-card">
+    <div class="kpi-icon">🔗</div>
+    <div class="kpi-val">400</div>
+    <div class="kpi-label">Gbps Capacity</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-icon">📊</div>
+    <div class="kpi-val">267</div>
+    <div class="kpi-label">Gbps Used</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-icon">⚡</div>
+    <div class="kpi-val teal">1.2ms</div>
+    <div class="kpi-label">→ Manhattan</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-icon">📡</div>
+    <div class="kpi-val green">3/3</div>
+    <div class="kpi-label">Carriers Online</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-icon">✅</div>
+    <div class="kpi-val green">99.99%</div>
+    <div class="kpi-label">Network Uptime</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-icon">🔌</div>
+    <div class="kpi-val orange">8</div>
+    <div class="kpi-label">Cross-Connects</div>
+  </div>
+</div>
+
+<!-- Main layout -->
+<div class="main-layout">
+
+  <!-- Network Topology Map -->
+  <div class="card">
+    <div class="card-title">Network Topology Map
+      <span style="float:right; font-size:10px; color:var(--text-muted); font-weight:400; letter-spacing:0;">1.2ms · 60 Hudson St</span>
+    </div>
+
+    <div class="topology-wrap" id="topo-wrap">
+      <div class="tooltip" id="tooltip">
+        <div class="tt-name" id="tt-name"></div>
+        <div id="tt-detail"></div>
+      </div>
+
+      <svg id="topology" viewBox="0 0 740 420" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <radialGradient id="nodeGrad" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stop-color="#ffffff"/>
+            <stop offset="100%" stop-color="#e8f0ff"/>
+          </radialGradient>
+          <filter id="node-shadow">
+            <feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#1a6fff" flood-opacity="0.15"/>
+          </filter>
+          <filter id="glow-blue">
+            <feGaussianBlur stdDeviation="3" result="blur"/>
+            <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+          </filter>
+          <marker id="arr-blue" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+            <path d="M0,0 L8,3 L0,6 Z" fill="#1a6fff" opacity="0.6"/>
+          </marker>
+          <marker id="arr-teal" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+            <path d="M0,0 L8,3 L0,6 Z" fill="#00b4d8" opacity="0.7"/>
+          </marker>
+          <marker id="arr-green" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+            <path d="M0,0 L8,3 L0,6 Z" fill="#10b981" opacity="0.6"/>
+          </marker>
+          <pattern id="bg-dots" width="24" height="24" patternUnits="userSpaceOnUse">
+            <circle cx="12" cy="12" r="1" fill="#dce8f8" opacity="0.6"/>
+          </pattern>
+
+          <!-- Animated dash for active connections -->
+          <style>
+            .flow-line {
+              stroke-dasharray: 12, 6;
+              animation: flow 2s linear infinite;
+            }
+            .flow-line-slow {
+              stroke-dasharray: 8, 8;
+              animation: flow 3.5s linear infinite;
+            }
+            @keyframes flow {
+              to { stroke-dashoffset: -36; }
+            }
+            .node-pulse {
+              animation: nodePulse 2.5s ease-in-out infinite;
+            }
+            @keyframes nodePulse {
+              0%, 100% { r: 38; opacity: 1; }
+              50% { r: 42; opacity: 0.7; }
+            }
+          </style>
+        </defs>
+
+        <!-- Background -->
+        <rect width="740" height="420" fill="#f8faff" rx="8"/>
+        <rect width="740" height="420" fill="url(#bg-dots)" rx="8"/>
+
+        <!-- Manhattan skyline silhouette -->
+        <g id="skyline" opacity="0.06">
+          <rect x="0" y="320" width="740" height="100" fill="#1a6fff"/>
+          <!-- Buildings -->
+          <rect x="20" y="290" width="30" height="30" fill="#1a6fff"/>
+          <rect x="55" y="270" width="20" height="50" fill="#1a6fff"/>
+          <rect x="80" y="285" width="35" height="35" fill="#1a6fff"/>
+          <rect x="120" y="260" width="18" height="60" fill="#1a6fff"/>
+          <rect x="143" y="275" width="28" height="45" fill="#1a6fff"/>
+          <rect x="180" y="250" width="15" height="70" fill="#1a6fff"/><!-- Empire State -->
+          <rect x="185" y="230" width="5" height="20" fill="#1a6fff"/>
+          <rect x="200" y="268" width="25" height="52" fill="#1a6fff"/>
+          <rect x="230" y="278" width="32" height="42" fill="#1a6fff"/>
+          <rect x="267" y="260" width="20" height="60" fill="#1a6fff"/>
+          <rect x="292" y="270" width="40" height="50" fill="#1a6fff"/>
+          <rect x="338" y="255" width="18" height="65" fill="#1a6fff"/>
+          <rect x="361" y="263" width="14" height="57" fill="#1a6fff"/>
+          <rect x="380" y="272" width="30" height="48" fill="#1a6fff"/>
+          <rect x="415" y="258" width="22" height="62" fill="#1a6fff"/>
+          <rect x="442" y="275" width="35" height="45" fill="#1a6fff"/>
+          <rect x="482" y="268" width="25" height="52" fill="#1a6fff"/>
+          <rect x="512" y="252" width="18" height="68" fill="#1a6fff"/><!-- Chrysler -->
+          <rect x="515" y="238" width="12" height="14" fill="#1a6fff"/>
+          <rect x="536" y="270" width="30" height="50" fill="#1a6fff"/>
+          <rect x="572" y="260" width="22" height="60" fill="#1a6fff"/>
+          <rect x="600" y="278" width="35" height="42" fill="#1a6fff"/>
+          <rect x="640" y="265" width="20" height="55" fill="#1a6fff"/>
+          <rect x="665" y="280" width="30" height="40" fill="#1a6fff"/>
+          <rect x="700" y="270" width="25" height="50" fill="#1a6fff"/>
+        </g>
+
+        <!-- ====== CONNECTION LINES ====== -->
+
+        <!-- MMR → 60 Hudson (primary) -->
+        <line x1="370" y1="200" x2="580" y2="90"
+          stroke="#1a6fff" stroke-width="2.5" opacity="0.5" class="flow-line"/>
+        <!-- MMR → 32 Ave of Americas -->
+        <line x1="370" y1="200" x2="580" y2="200"
+          stroke="#00b4d8" stroke-width="2" opacity="0.45" class="flow-line-slow"/>
+        <!-- MMR → 111 8th Ave -->
+        <line x1="370" y1="200" x2="560" y2="310"
+          stroke="#10b981" stroke-width="1.5" opacity="0.4" class="flow-line-slow"/>
+
+        <!-- Zayo → MMR -->
+        <line x1="120" y1="100" x2="340" y2="195"
+          stroke="#1a6fff" stroke-width="3" opacity="0.6" class="flow-line"
+          marker-end="url(#arr-blue)"/>
+
+        <!-- Crown Castle → MMR -->
+        <line x1="120" y1="205" x2="340" y2="205"
+          stroke="#00b4d8" stroke-width="2.5" opacity="0.55" class="flow-line-slow"
+          marker-end="url(#arr-teal)"/>
+
+        <!-- Lightpath → MMR -->
+        <line x1="120" y1="305" x2="340" y2="215"
+          stroke="#10b981" stroke-width="2" opacity="0.5" class="flow-line-slow"
+          marker-end="url(#arr-green)"/>
+
+        <!-- AWS/Azure/GCP from 60 Hudson -->
+        <line x1="610" y1="85" x2="680" y2="120"
+          stroke="#f59e0b" stroke-width="1.5" opacity="0.5" stroke-dasharray="4,3"/>
+        <line x1="610" y1="90" x2="680" y2="190"
+          stroke="#1a6fff" stroke-width="1.5" opacity="0.4" stroke-dasharray="4,3"/>
+        <line x1="610" y1="95" x2="680" y2="260"
+          stroke="#ef4444" stroke-width="1.5" opacity="0.4" stroke-dasharray="4,3"/>
+
+        <!-- Latency labels on main lines -->
+        <text x="235" y="148" font-family="DM Mono" font-size="10" fill="#1a6fff" opacity="0.7" transform="rotate(-22,235,148)">200 Gbps · 0.8ms</text>
+        <text x="195" y="218" font-family="DM Mono" font-size="10" fill="#00b4d8" opacity="0.7">100 Gbps · 1.1ms</text>
+        <text x="200" y="278" font-family="DM Mono" font-size="10" fill="#10b981" opacity="0.7" transform="rotate(18,200,278)">100 Gbps · 1.4ms</text>
+        <text x="465" y="128" font-family="DM Mono" font-size="9" fill="#1a6fff" opacity="0.6" transform="rotate(-22,465,128)">1.2ms → Manhattan</text>
+
+        <!-- ====== NODES ====== -->
+
+        <!-- MicroLink / MMR — CENTER -->
+        <circle cx="370" cy="205" r="44" fill="#e8f0ff" opacity="0.4" class="node-pulse"/>
+        <circle cx="370" cy="205" r="38" fill="url(#nodeGrad)" stroke="#1a6fff" stroke-width="2"
+          filter="url(#node-shadow)"
+          class="node" data-name="Meet-Me Room (MMR)" data-detail="329 Greenpoint Ave · 8 cross-connects · 400 Gbps total capacity"/>
+        <text x="370" y="199" text-anchor="middle" font-family="DM Sans" font-size="11" fill="#1a6fff" font-weight="600">MICRO</text>
+        <text x="370" y="213" text-anchor="middle" font-family="DM Sans" font-size="11" fill="#1a6fff" font-weight="600">LINK</text>
+        <text x="370" y="226" text-anchor="middle" font-family="DM Mono" font-size="8" fill="#94a3b8">MMR</text>
+
+        <!-- Zayo -->
+        <circle cx="100" cy="100" r="32" fill="white" stroke="#1a6fff" stroke-width="1.5" filter="url(#node-shadow)"
+          class="node" data-name="Zayo · 200 Gbps" data-detail="Primary carrier · Online · Latency 0.8ms · Route: 60 Hudson St"/>
+        <text x="100" y="97" text-anchor="middle" font-family="DM Sans" font-size="11" fill="#1a6fff" font-weight="600">ZAYO</text>
+        <text x="100" y="111" text-anchor="middle" font-family="DM Mono" font-size="9" fill="#10b981">● 200G</text>
+
+        <!-- Crown Castle -->
+        <circle cx="100" cy="205" r="32" fill="white" stroke="#00b4d8" stroke-width="1.5" filter="url(#node-shadow)"
+          class="node" data-name="Crown Castle · 100 Gbps" data-detail="Secondary carrier · Online · Latency 1.1ms · Route: 32 Ave of Americas"/>
+        <text x="100" y="198" text-anchor="middle" font-family="DM Sans" font-size="9" fill="#00b4d8" font-weight="600">CROWN</text>
+        <text x="100" y="210" text-anchor="middle" font-family="DM Sans" font-size="9" fill="#00b4d8" font-weight="600">CASTLE</text>
+        <text x="100" y="223" text-anchor="middle" font-family="DM Mono" font-size="9" fill="#10b981">● 100G</text>
+
+        <!-- Lightpath -->
+        <circle cx="100" cy="305" r="32" fill="white" stroke="#10b981" stroke-width="1.5" filter="url(#node-shadow)"
+          class="node" data-name="Lightpath · 100 Gbps" data-detail="Tertiary carrier · Online · Latency 1.4ms · Route: 111 8th Ave"/>
+        <text x="100" y="302" text-anchor="middle" font-family="DM Sans" font-size="10" fill="#10b981" font-weight="600">LIGHT</text>
+        <text x="100" y="315" text-anchor="middle" font-family="DM Sans" font-size="10" fill="#10b981" font-weight="600">PATH</text>
+        <text x="100" y="328" text-anchor="middle" font-family="DM Mono" font-size="9" fill="#10b981">● 100G</text>
+
+        <!-- 60 Hudson -->
+        <circle cx="590" cy="90" r="36" fill="white" stroke="#1a6fff" stroke-width="1.5" filter="url(#node-shadow)"
+          class="node" data-name="60 Hudson Street" data-detail="Primary carrier hotel · Manhattan · 1.2ms latency · Zayo primary route"/>
+        <text x="590" y="85" text-anchor="middle" font-family="DM Sans" font-size="10" fill="#0f172a" font-weight="600">60 Hudson</text>
+        <text x="590" y="98" text-anchor="middle" font-family="DM Mono" font-size="9" fill="#94a3b8">NYC · 1.2ms</text>
+
+        <!-- 32 AoA -->
+        <circle cx="590" cy="205" r="30" fill="white" stroke="#00b4d8" stroke-width="1.5" filter="url(#node-shadow)"
+          class="node" data-name="32 Ave of Americas" data-detail="Secondary carrier hotel · Manhattan · Crown Castle route"/>
+        <text x="590" y="199" text-anchor="middle" font-family="DM Sans" font-size="9" fill="#0f172a" font-weight="600">32 AoA</text>
+        <text x="590" y="212" text-anchor="middle" font-family="DM Mono" font-size="8" fill="#94a3b8">1.6ms</text>
+
+        <!-- 111 8th -->
+        <circle cx="570" cy="310" r="28" fill="white" stroke="#10b981" stroke-width="1.5" filter="url(#node-shadow)"
+          class="node" data-name="111 8th Ave (Google)" data-detail="GCP gateway · Lightpath route · 3.1ms to GCP us-east4"/>
+        <text x="570" y="305" text-anchor="middle" font-family="DM Sans" font-size="9" fill="#0f172a" font-weight="600">111 8th</text>
+        <text x="570" y="318" text-anchor="middle" font-family="DM Mono" font-size="8" fill="#94a3b8">2.1ms</text>
+
+        <!-- AWS -->
+        <circle cx="685" cy="125" r="24" fill="#fff8ec" stroke="#f59e0b" stroke-width="1.5" filter="url(#node-shadow)"
+          class="node" data-name="AWS us-east-1" data-detail="Latency: 2.1ms · 60 Hudson route"/>
+        <text x="685" y="121" text-anchor="middle" font-family="DM Sans" font-size="9" fill="#f59e0b" font-weight="600">AWS</text>
+        <text x="685" y="133" text-anchor="middle" font-family="DM Mono" font-size="8" fill="#94a3b8">2.1ms</text>
+
+        <!-- Azure -->
+        <circle cx="695" cy="195" r="24" fill="#eef5ff" stroke="#1a6fff" stroke-width="1.5" filter="url(#node-shadow)"
+          class="node" data-name="Azure East US" data-detail="Latency: 2.4ms · 60 Hudson route"/>
+        <text x="695" y="191" text-anchor="middle" font-family="DM Sans" font-size="9" fill="#1a6fff" font-weight="600">Azure</text>
+        <text x="695" y="203" text-anchor="middle" font-family="DM Mono" font-size="8" fill="#94a3b8">2.4ms</text>
+
+        <!-- GCP -->
+        <circle cx="685" cy="265" r="24" fill="#fff0f0" stroke="#ef4444" stroke-width="1.5" filter="url(#node-shadow)"
+          class="node" data-name="GCP us-east4" data-detail="Latency: 3.1ms · 111 8th Ave route"/>
+        <text x="685" y="261" text-anchor="middle" font-family="DM Sans" font-size="9" fill="#ef4444" font-weight="600">GCP</text>
+        <text x="685" y="273" text-anchor="middle" font-family="DM Mono" font-size="8" fill="#94a3b8">3.1ms</text>
+
+        <!-- Capacity utilization ring on MMR node -->
+        <circle cx="370" cy="205" r="38" fill="none" stroke="#1a6fff" stroke-width="3"
+          stroke-dasharray="150 90" stroke-dashoffset="25" opacity="0.25"
+          transform="rotate(-90 370 205)"/>
+
+      </svg>
+    </div>
+  </div>
+
+  <!-- Right column -->
+  <div class="right-col">
+
+    <!-- Carrier Status -->
+    <div class="card">
+      <div class="card-title">Carrier Status</div>
+      <div class="carrier-row">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <div class="status-dot"></div>
+          <div class="carrier-info">
+            <span class="carrier-name">Zayo</span>
+            <span class="carrier-cap">200 Gbps</span>
+          </div>
+        </div>
+        <span style="font-size:11px; color:var(--green); font-family:'DM Mono',monospace; font-weight:500;">ONLINE</span>
+      </div>
+      <div class="carrier-row">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <div class="status-dot" style="background:var(--teal); box-shadow:0 0 6px rgba(0,180,216,0.5);"></div>
+          <div class="carrier-info">
+            <span class="carrier-name">Crown Castle</span>
+            <span class="carrier-cap">100 Gbps</span>
+          </div>
+        </div>
+        <span style="font-size:11px; color:var(--green); font-family:'DM Mono',monospace; font-weight:500;">ONLINE</span>
+      </div>
+      <div class="carrier-row">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <div class="status-dot" style="background:var(--green);"></div>
+          <div class="carrier-info">
+            <span class="carrier-name">Lightpath</span>
+            <span class="carrier-cap">100 Gbps</span>
+          </div>
+        </div>
+        <span style="font-size:11px; color:var(--green); font-family:'DM Mono',monospace; font-weight:500;">ONLINE</span>
+      </div>
+    </div>
+
+    <!-- Cloud Latency -->
+    <div class="card">
+      <div class="card-title">Cloud Latency</div>
+      <div class="latency-row">
+        <div class="cloud-name">
+          <div class="cloud-icon aws">AWS</div>
+          us-east-1
+        </div>
+        <span class="latency-val">2.1 ms</span>
+      </div>
+      <div class="latency-row">
+        <div class="cloud-name">
+          <div class="cloud-icon azure">AZ</div>
+          East US
+        </div>
+        <span class="latency-val">2.4 ms</span>
+      </div>
+      <div class="latency-row">
+        <div class="cloud-name">
+          <div class="cloud-icon gcp">GCP</div>
+          us-east4
+        </div>
+        <span class="latency-val" style="color:var(--orange);">3.1 ms</span>
+      </div>
+    </div>
+
+    <!-- Tenant Bandwidth -->
+    <div class="card">
+      <div class="card-title">Tenant Bandwidth</div>
+
+      <div class="bw-row">
+        <div class="bw-header">
+          <span class="bw-name">Equinix Remote Hall</span>
+          <span class="bw-val">120 / 200 Gbps</span>
+        </div>
+        <div class="bw-track"><div class="bw-fill" style="width:60%"></div></div>
+      </div>
+
+      <div class="bw-row">
+        <div class="bw-header">
+          <span class="bw-name">GPU Cloud Services</span>
+          <span class="bw-val">95 / 100 Gbps</span>
+        </div>
+        <div class="bw-track"><div class="bw-fill high" style="width:95%"></div></div>
+      </div>
+
+      <div class="bw-row">
+        <div class="bw-header">
+          <span class="bw-name">Wholesale Client A</span>
+          <span class="bw-val">40 / 80 Gbps</span>
+        </div>
+        <div class="bw-track"><div class="bw-fill" style="width:50%"></div></div>
+      </div>
+
+      <div class="bw-row" style="margin-bottom:0;">
+        <div class="bw-header">
+          <span class="bw-name">Edge Retail</span>
+          <span class="bw-val">12 / 20 Gbps</span>
+        </div>
+        <div class="bw-track"><div class="bw-fill" style="width:60%"></div></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+  const wrap = document.getElementById('topo-wrap');
+  const tooltip = document.getElementById('tooltip');
+  const ttName = document.getElementById('tt-name');
+  const ttDetail = document.getElementById('tt-detail');
+
+  document.querySelectorAll('.node').forEach(el => {
+    el.style.cursor = 'pointer';
+
+    el.addEventListener('mouseenter', e => {
+      ttName.textContent = el.dataset.name || '';
+      ttDetail.textContent = el.dataset.detail || '';
+      tooltip.classList.add('visible');
+    });
+
+    el.addEventListener('mousemove', e => {
+      const rect = wrap.getBoundingClientRect();
+      tooltip.style.left = (e.clientX - rect.left + 14) + 'px';
+      tooltip.style.top = (e.clientY - rect.top - 8) + 'px';
+    });
+
+    el.addEventListener('mouseleave', () => {
+      tooltip.classList.remove('visible');
+    });
+  });
+</script>
+</body>
+</html>

@@ -19,6 +19,7 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy import text
@@ -149,7 +150,12 @@ class BatchWriter:
         try:
             async with self._engine.begin() as conn:
                 # Build parameter arrays for unnest-based bulk insert
-                times = [r.time for r in batch]
+                # asyncpg requires native datetime objects, not ISO strings
+                times = [
+                    datetime.fromisoformat(r.time.replace("Z", "+00:00"))
+                    if isinstance(r.time, str) else r.time
+                    for r in batch
+                ]
                 sensor_ids = [r.sensor_id for r in batch]
                 values = [r.value for r in batch]
                 qualities = [r.quality for r in batch]

@@ -90,13 +90,19 @@ def create_app() -> FastAPI:
     )
 
     # Register routers
-    from .routes import sites, blocks, telemetry, alarms, events, billing, health, websockets
+    from .routes import (
+        sites, blocks, telemetry, alarms, events, billing,
+        health, websockets, esg, tenants, connectivity,
+    )
     app.include_router(sites.router, prefix="/api/v1", tags=["Sites"])
     app.include_router(blocks.router, prefix="/api/v1", tags=["Blocks"])
     app.include_router(telemetry.router, prefix="/api/v1", tags=["Telemetry"])
     app.include_router(alarms.router, prefix="/api/v1", tags=["Alarms"])
     app.include_router(events.router, prefix="/api/v1", tags=["Events"])
     app.include_router(billing.router, prefix="/api/v1", tags=["Billing"])
+    app.include_router(esg.router, prefix="/api/v1", tags=["ESG"])
+    app.include_router(tenants.router, prefix="/api/v1", tags=["Tenants"])
+    app.include_router(connectivity.router, prefix="/api/v1", tags=["Connectivity"])
     app.include_router(health.router, tags=["Health"])
     app.include_router(websockets.router, prefix="/api/v1", tags=["WebSocket"])
 
