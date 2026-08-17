@@ -1,0 +1,8 @@
+{
+  "name": "microlinkdc-mcs1",
+  "private": true,
+  "scripts": {
+    "deploy": "set \"NODE_OPTIONS=--dns-result-order=ipv4first\" && npx wrangler pages deploy --project-name microlinkdc-mcs1 --branch=main --commit-dirty=true",
+    "predeploy": "node tools/predeploy-guard.js"
+  }
+}
